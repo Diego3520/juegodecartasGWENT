@@ -15,7 +15,7 @@ class MyCardGameApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Juego de Cartas',
+      title: 'Gwent',
       theme: ThemeData(
         primarySwatch: Colors.brown,
         fontFamily: 'Cinzel',
@@ -85,10 +85,10 @@ class _InicioPantallaState extends State<InicioPantalla> with SingleTickerProvid
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const Text(
-                        'Batalla de Cartas',
+                        'Gwent',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 48,
+                          fontSize: 50,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                           shadows: [
