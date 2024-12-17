@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'repartir_cartas.dart';
+import 'dart:math';
+import 'main.dart';
 
 class CampoBatalla extends StatefulWidget {
   final String tipoMazo;
@@ -22,15 +24,538 @@ class _CampoBatallaState extends State<CampoBatalla> {
   List<String> cartasEnCampoVerdec = [];
   
   bool isDragging = false;
+  bool isCPUTurn = false;
+  bool isGameOver = false;
+  int playerLives = 2;
+  int cpuLives = 2;
+  int currentRound = 1;
+  bool _cpuHasPassed = false;
+  bool _playerHasPassed = false;
 
   @override
   void initState() {
     super.initState();
     repartirCartas.repartir(widget.tipoMazo);
+
     setState(() {
       cartasEnCampoJugador = List.from(repartirCartas.cartasJugador);
       cartasEnCampoContrincante = List.from(repartirCartas.cartasContrincante);
+      isCPUTurn = Random().nextBool();
+
+      // Mostrar modal al inicio del juego
+      _mostrarModal(
+        titulo: 'Inicio del Juego',
+        mensaje: isCPUTurn
+            ? 'El CPU inicia el juego. Espera su jugada.'
+            : 'Es tu turno. ¡Haz tu mejor jugada!',
+        onClose: () {
+          if (isCPUTurn) {
+            _cpuTurn();
+          }
+        },
+      );
     });
+  }
+
+  void _mostrarModalSalir() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.brown[700],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.brown[900]!, width: 4),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Salir del Juego',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '¿Estás seguro de que quieres salir? Se perderá el progreso actual.',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[700],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        // Cerrar el modal
+                        Navigator.of(context).pop();
+                      },
+                      child: const Text(
+                        'Cancelar',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[800],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        // Cerrar todos los modales
+                        _cerrarTodosLosModales();
+                        
+                        // Navegar a la pantalla principal (main.dart)
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (context) => const MyCardGameApp()), 
+                          (Route<dynamic> route) => false
+                        );
+                      },
+                      child: const Text(
+                        'Salir',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _cerrarTodosLosModales() {
+    Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
+  }
+
+  void _cpuTurn() {
+    // Si el CPU ya pasó, no hace nada
+    if (_cpuHasPassed) {
+      _mostrarModal(
+        titulo: 'El CPU ha pasado',
+        mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+        onClose: () => _endRoundIfBothPassed(),
+      );
+      return;
+    }
+
+    int cpuTotalPower = _calculateTotalPower(true);
+    int playerTotalPower = _calculateTotalPower(false);
+
+    // Si el jugador ha pasado, el CPU debe decidir si jugar o pasar
+    if (_playerHasPassed) {
+      if (cartasEnCampoContrincante.isEmpty || cpuTotalPower > playerTotalPower) {
+        // Si no tiene cartas o ya superó al jugador, pasa
+        _cpuHasPassed = true;
+        _mostrarModal(
+          titulo: 'El CPU ha pasado',
+          mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+          onClose: () => _endRoundIfBothPassed(),
+        );
+      return;
+      } else {
+        // Selecciona una carta y juega para intentar superar
+        String selectedCard = _selectBestCPUCard();
+        List<String> targetRow = _selectBestCPURow(selectedCard);
+
+        Future.delayed(Duration(seconds: 1), () {
+          setState(() {
+            cartasEnCampoContrincante.remove(selectedCard);
+            targetRow.add(selectedCard);
+          });
+          // Llama recursivamente después de jugar
+          _cpuTurn();
+        });
+      }
+      return;
+    }
+
+    // Lógica habitual si el jugador no ha pasado
+    if (cartasEnCampoContrincante.isEmpty) {
+      isCPUTurn = false;
+      _cpuHasPassed = true;
+      _mostrarModal(
+        titulo: 'El CPU ha pasado',
+        mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+        onClose: () => _endRoundIfBothPassed(),
+      );
+      return;
+    }
+
+    // Si el CPU tiene clara ventaja, pasa
+    if (cpuTotalPower > playerTotalPower + 10) {
+      _cpuHasPassed = true;
+      _mostrarModal(
+        titulo: 'El CPU ha pasado',
+        mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+        onClose: () => _endRoundIfBothPassed(),
+      );
+      return;
+    }
+
+    // Si el CPU tiene menos cartas y no puede superar al jugador, pasa
+    if (cartasEnCampoContrincante.length < cartasEnCampoJugador.length &&
+        cpuTotalPower <= playerTotalPower) {
+      _cpuHasPassed = true;
+      _mostrarModal(
+        titulo: 'El CPU ha pasado',
+        mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+        onClose: () => _endRoundIfBothPassed(),
+      );
+      return;
+    }
+
+    // Si está perdiendo significativamente, debe jugar una carta
+    if (playerTotalPower > cpuTotalPower + 10 || !_cpuHasPassed) {
+      String selectedCard = _selectBestCPUCard();
+      List<String> targetRow = _selectBestCPURow(selectedCard);
+
+      Future.delayed(Duration(seconds: 1), () {
+        setState(() {
+          cartasEnCampoContrincante.remove(selectedCard);
+          targetRow.add(selectedCard);
+          isCPUTurn = false;
+        });
+      });
+    } else {
+      // Si no puede superar al jugador de forma lógica, pasa
+      _cpuHasPassed = true;
+      _mostrarModal(
+        titulo: 'El CPU ha pasado',
+        mensaje: 'El contrincante no jugará más cartas en esta ronda.',
+        onClose: () => _endRoundIfBothPassed(),
+      );
+    }
+  }
+
+  void _endRoundIfBothPassed() {
+    if (_cpuHasPassed && _playerHasPassed) {
+      _endRound();
+    }
+  }
+
+  String _selectBestCPUCard() {
+    // Simple card selection strategy
+    return cartasEnCampoContrincante[Random().nextInt(cartasEnCampoContrincante.length)];
+  }
+
+  List<String> _selectBestCPURow(String card) {
+    final cartaDetalle = repartirCartas.obtenerCartaPorId(card);
+    
+    // Select appropriate row based on card type
+    switch (cartaDetalle.tipo) {
+      case TipoCarta.castillo:
+        return cartasEnCampoRojot;
+      case TipoCarta.security:
+        return cartasEnCampoRojoa;
+      case TipoCarta.sword:
+        return cartasEnCampoRojoc;
+    }
+  }
+
+  void _endRound() {
+    int playerTotalPower = _calculateTotalPower(false);
+    int cpuTotalPower = _calculateTotalPower(true);
+
+    setState(() {
+      String mensaje;
+      if (playerTotalPower > cpuTotalPower) {
+        cpuLives--;
+        mensaje = '¡Ganaste la ronda! El contrincante pierde una vida.';
+      } else if (cpuTotalPower > playerTotalPower) {
+        playerLives--;
+        mensaje = 'Perdiste la ronda. Tú pierdes una vida.';
+      } else {
+        cpuLives--;
+        playerLives--;
+        mensaje = '¡Empate! Ambos pierden una vida.';
+      }
+
+      _mostrarModal(
+        titulo: 'Resultado de la Ronda',
+        mensaje: mensaje,
+        onClose: () {
+          if (playerLives <= 0 || cpuLives <= 0) {
+            _endGame();
+          } else {
+            _resetBoardForNewRound();
+          }
+        },
+      );
+    });
+  }
+
+  void _resetBoardForNewRound() {
+    setState(() {
+      // Limpiar campos de cartas
+      cartasEnCampoRojot.clear();
+      cartasEnCampoRojoa.clear();
+      cartasEnCampoRojoc.clear();
+      cartasEnCampoVerdet.clear();
+      cartasEnCampoVerdea.clear();
+      cartasEnCampoVerdec.clear();
+
+      // Resetear estados de paso
+      _cpuHasPassed = false;
+      _playerHasPassed = false;
+
+      // Incrementar número de ronda
+      currentRound++;
+
+      // Decidir turno inicial aleatoriamente
+      isCPUTurn = Random().nextBool();
+
+      // Mostrar modal de inicio de turno
+      _mostrarModal(
+        titulo: 'Inicio de la Ronda $currentRound',
+        mensaje: isCPUTurn
+            ? 'Es el turno del CPU. Espera su jugada.'
+            : 'Es tu turno. ¡Haz tu mejor jugada!',
+        onClose: () {
+          if (isCPUTurn) {
+            _cpuTurn();
+          }
+        },
+      );
+    });
+  }
+
+  void _endGame() {
+    setState(() {
+      isGameOver = true;
+    });
+
+    // Determinar el resultado del juego
+    String titulo;
+    String mensaje;
+
+    if (playerLives <= 0 && cpuLives <= 0) {
+      // Caso de empate
+      titulo = '¡Empate!';
+      mensaje = 'Ambos jugadores han perdido todas sus vidas.\nResultado final: Empate';
+    } else if (playerLives > 0) {
+      titulo = '¡Ganaste!';
+      mensaje = 'Resultado final: Jugador $playerLives - CPU $cpuLives.\nGracias por jugar.';
+    } else {
+      titulo = '¡Perdiste!';
+      mensaje = 'Resultado final: Jugador $playerLives - CPU $cpuLives.\nGracias por jugar.';
+    }
+
+    _mostrarModal(
+      titulo: titulo,
+      mensaje: mensaje,
+      onClose: () {
+        // Navegar a la pantalla principal usando pushAndRemoveUntil
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const MyCardGameApp()), 
+          (Route<dynamic> route) => false
+        );
+      },
+    );
+  }
+
+  int _calcularPoderFila(List<String> cartasEnFila) {
+    // Contar cuántas cartas hay de cada tipo
+    int castilloCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.castillo).length;
+    int securityCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.security).length;
+    int swordCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.sword).length;
+
+    // Calculamos el poder base de la fila
+    int poderBase = cartasEnFila.isEmpty 
+      ? 0 
+      : cartasEnFila
+          .map((carta) => repartirCartas.obtenerCartaPorId(carta).poder)
+          .reduce((a, b) => a + b);
+
+    // Aplicamos bonus si hay 3 o más cartas del mismo tipo
+    int poderBonus = 0;
+    if (castilloCount >= 3) {
+      poderBonus += castilloCount;
+    }
+    if (securityCount >= 3) {
+      poderBonus += securityCount;
+    }
+    if (swordCount >= 3) {
+      poderBonus += swordCount;
+    }
+
+    return poderBase + poderBonus;
+  }
+
+  // Método modificado para calcular el poder total con las filas individuales
+  int _calculateTotalPower(bool isCPU) {
+    int poderRojot, poderRojoa, poderRojoc;
+    int poderVerdet, poderVerdea, poderVerdec;
+
+    if (isCPU) {
+      poderRojot = _calcularPoderFila(cartasEnCampoRojot);
+      poderRojoa = _calcularPoderFila(cartasEnCampoRojoa);
+      poderRojoc = _calcularPoderFila(cartasEnCampoRojoc);
+      
+      return poderRojot + poderRojoa + poderRojoc;
+    } else {
+      poderVerdet = _calcularPoderFila(cartasEnCampoVerdet);
+      poderVerdea = _calcularPoderFila(cartasEnCampoVerdea);
+      poderVerdec = _calcularPoderFila(cartasEnCampoVerdec);
+      
+      return poderVerdet + poderVerdea + poderVerdec;
+    }
+  }
+
+  void _passTurn() {
+    setState(() {
+      _playerHasPassed = true;
+      isCPUTurn = true;
+    });
+    // Si el CPU no ha pasado, le toca jugar
+    if (!_cpuHasPassed) {
+      _cpuTurn();
+    } else {
+      _endRound();
+    }
+  }
+
+  void _mostrarModal({
+    required String titulo,
+    required String mensaje,
+    required VoidCallback onClose,
+    bool delay = false,
+  }) {
+    Future.delayed(
+      delay ? const Duration(seconds: 2) : Duration.zero,
+      () {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.brown[700],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.brown[900]!, width: 4),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      titulo,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      mensaje,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.brown[800],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onClose();
+                      },
+                      child: const Text(
+                        'Cerrar',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  int _calcularPoderConBonus(List<String> cartasEnFila) {
+    // Contar cuántas cartas hay de cada tipo
+    int castilloCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.castillo).length;
+    int securityCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.security).length;
+    int swordCount = cartasEnFila.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.sword).length;
+
+    // Calculamos el poder base de la fila
+    int poderTotal = cartasEnFila.isEmpty 
+      ? 0 
+      : cartasEnFila
+          .map((carta) => repartirCartas.obtenerCartaPorId(carta).poder)
+          .reduce((a, b) => a + b);
+
+    // Aplicamos bonus si hay 3 o más cartas del mismo tipo
+    if (castilloCount >= 3) {
+      poderTotal += cartasEnFila
+        .where((carta) => repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.castillo)
+        .length;
+    }
+    if (securityCount >= 3) {
+      poderTotal += cartasEnFila
+        .where((carta) => repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.security)
+        .length;
+    }
+    if (swordCount >= 3) {
+      poderTotal += cartasEnFila
+        .where((carta) => repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.sword)
+        .length;
+    }
+
+    return poderTotal;
   }
 
   @override
@@ -79,7 +604,7 @@ class _CampoBatallaState extends State<CampoBatalla> {
                             ],
                           ),
                         ),
-                        _crearEspacioCartasJugador(Colors.green[400]!, cartasEnCampoJugador, false),
+                        _crearEspacioCartasJugador(Colors.green[400]!, cartasEnCampoJugador, false), 
                       ],
                     ),
                   ),
@@ -91,59 +616,7 @@ class _CampoBatallaState extends State<CampoBatalla> {
             top: 40,
             right: 20,
             child: GestureDetector(
-              onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      backgroundColor: Colors.brown[200],
-                      title: const Text(
-                        'Confirmación',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
-                      ),
-                      content: const Text(
-                        '¿Estás seguro de terminar la partida?',
-                        style: TextStyle(
-                          color: Colors.black,
-                        ),
-                      ),
-                      actions: <Widget>[
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(); // Cierra el modal
-                          },
-                          child: const Text(
-                            'Cancelar',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(); // Cierra el modal
-                            Navigator.pop(context); // Cierra la partida
-                          },
-                          child: const Text(
-                            'Aceptar',
-                            style: TextStyle(
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
+              onTap: () => _mostrarModalSalir(),
               child: Container(
                 padding: const EdgeInsets.all(8.0),
                 decoration: BoxDecoration(
@@ -167,13 +640,13 @@ class _CampoBatallaState extends State<CampoBatalla> {
     // Calcular el poder total dependiendo de si es contrincante o jugador
     int poderTotal = 0;
     if (nombre == 'Contrincante') {
-      poderTotal = cartasEnCampoRojot.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt() +
-                  cartasEnCampoRojoa.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt() +
-                  cartasEnCampoRojoc.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt();
+      poderTotal = _calcularPoderFila(cartasEnCampoRojot) +
+                  _calcularPoderFila(cartasEnCampoRojoa) +
+                  _calcularPoderFila(cartasEnCampoRojoc);
     } else if (nombre == 'Jugador Actual') {
-      poderTotal = cartasEnCampoVerdet.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt() +
-                  cartasEnCampoVerdea.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt() +
-                  cartasEnCampoVerdec.fold(0, (sum, carta) => sum + repartirCartas.obtenerCartaPorId(carta).poder).toInt();
+      poderTotal = _calcularPoderFila(cartasEnCampoVerdet) +
+                  _calcularPoderFila(cartasEnCampoVerdea) +
+                  _calcularPoderFila(cartasEnCampoVerdec);
     }
 
     return Column(
@@ -221,8 +694,6 @@ class _CampoBatallaState extends State<CampoBatalla> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _buildLifeContainer(true),
-              const SizedBox(width: 5),
-              _buildLifeContainer(true),
             ],
           ),
         ],
@@ -230,9 +701,7 @@ class _CampoBatallaState extends State<CampoBatalla> {
           const SizedBox(height: 8),
           // Botón de Pasar
           IconButton(
-            onPressed: () {
-              print('Turno pasado');
-            },
+            onPressed: _passTurn,
             icon: Icon(
               Icons.skip_next,
               color: Colors.white,
@@ -250,8 +719,6 @@ class _CampoBatallaState extends State<CampoBatalla> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildLifeContainer(false),
-              const SizedBox(width: 5),
               _buildLifeContainer(false),
             ],
           ),
@@ -298,14 +765,22 @@ class _CampoBatallaState extends State<CampoBatalla> {
   }
 
   Widget _buildLifeContainer(bool isOpponent) {
-    return Container(
-      width: 20,
-      height: 20,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-        color: Colors.red[700], 
-      ),
+    int lives = isOpponent ? cpuLives : playerLives;
+    
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(2, (index) {
+        return Container(
+          width: 20,
+          height: 20,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            color: index < lives ? Colors.red[700] : Colors.white, // Color según las vidas
+          ),
+        );
+      }),
     );
   }
 
@@ -361,17 +836,27 @@ class _CampoBatallaState extends State<CampoBatalla> {
   bool esRojo
   ) {
     // Calcular el poder total de las cartas en esta fila
-    int poderTotal = cartasEnCampo.isEmpty 
-      ? 0 
-      : cartasEnCampo
-          .map((carta) => repartirCartas.obtenerCartaPorId(carta).poder)
-          .reduce((a, b) => a + b);
+    int poderTotal = _calcularPoderFila(cartasEnCampo);
+
+    // Determinar si hay bonus activo
+    bool hayBonus = false;
+    int castilloCount = cartasEnCampo.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.castillo).length;
+    int securityCount = cartasEnCampo.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.security).length;
+    int swordCount = cartasEnCampo.where((carta) => 
+      repartirCartas.obtenerCartaPorId(carta).tipo == TipoCarta.sword).length;
+
+    // Verificar si algún tipo tiene 3 o más cartas
+    if (castilloCount >= 3 || securityCount >= 3 || swordCount >= 3) {
+      hayBonus = true;
+    }
 
     return DragTarget<String>(
       onWillAccept: (data) {
         // Si es rojo, no se puede colocar carta
         if (esRojo) return false;
-
+        if (_playerHasPassed) return false;
         // Obtener los detalles de la carta
         final cartaDetalle = repartirCartas.obtenerCartaPorId(data!);
 
@@ -390,6 +875,16 @@ class _CampoBatallaState extends State<CampoBatalla> {
         setState(() {
           cartasEnCampoJugador.remove(carta);
           cartasEnCampo.add(carta);
+          if (!_cpuHasPassed) {
+            _cpuTurn();
+            isCPUTurn = true;
+          } else if (cartasEnCampoJugador.isEmpty) {
+            _passTurn();
+            isCPUTurn = true;
+            if (!_cpuHasPassed) {
+              _cpuTurn();
+            }
+          }
         });
       },
       builder: (context, candidateData, rejectedData) {
@@ -401,7 +896,7 @@ class _CampoBatallaState extends State<CampoBatalla> {
             color: colorFondo,
             borderRadius: BorderRadius.circular(10.0),
             border: Border.all(
-              color: Colors.brown[800]!,
+              color: hayBonus ? Colors.yellow[500]! : Colors.brown[800]!,
               width: 2,
             ),
           ),
@@ -425,7 +920,7 @@ class _CampoBatallaState extends State<CampoBatalla> {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.black, width: 2),
+                        border: Border.all(color: hayBonus ? Colors.yellow[500]! : Colors.brown[800]!, width: 2),
                       ),
                       child: Center(
                         child: Text(
@@ -683,36 +1178,57 @@ class _CampoBatallaState extends State<CampoBatalla> {
   }
 
   Widget _buildCardContainer(String carta, Color color) {
-  // Obtener los detalles de la carta usando el método obtenerCartaPorId
-  final cartaDetalle = repartirCartas.obtenerCartaPorId(carta);
+    // Obtener los detalles de la carta usando el método obtenerCartaPorId
+    final cartaDetalle = repartirCartas.obtenerCartaPorId(carta);
 
-  // Seleccionar el icono basado en el tipo de carta
-  IconData tipoIcono;
-  switch (cartaDetalle.tipo) {
-    case TipoCarta.castillo:
-      tipoIcono = Icons.castle;
-      break;
-    case TipoCarta.security:
-      tipoIcono = Icons.security;
-      break;
-    case TipoCarta.sword:
-      tipoIcono = Icons.person;
-      break;
-  }
+    // Determinar si es una carta del contrincante o del jugador
+    bool esCartaContrincante = cartasEnCampoContrincante.contains(carta);
 
-  return Container(
-    margin: const EdgeInsets.all(8.0),
-    width: 70,
-    height: 100,
-    decoration: BoxDecoration(
-      color: color,
-      borderRadius: BorderRadius.circular(8.0),
-      border: Border.all(color: Colors.brown[800]!, width: 2),
-      image: DecorationImage(
-        image: AssetImage(cartaDetalle.artwork),
-        fit: BoxFit.cover,
+    // Si es una carta del contrincante y no está en el campo de batalla, mostrar el reverso
+    if (esCartaContrincante && !_cartaEstaEnCampoDeBatalla(carta)) {
+      return Container(
+        margin: const EdgeInsets.all(8.0),
+        width: 70,
+        height: 100,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(8.0),
+          border: Border.all(color: Colors.brown[800]!, width: 2),
+          image: const DecorationImage(
+            image: AssetImage('assets/images/card_back.png'), // Asegúrate de tener esta imagen
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    }
+
+    // Seleccionar el icono basado en el tipo de carta
+    IconData tipoIcono;
+    switch (cartaDetalle.tipo) {
+      case TipoCarta.castillo:
+        tipoIcono = Icons.castle;
+        break;
+      case TipoCarta.security:
+        tipoIcono = Icons.security;
+        break;
+      case TipoCarta.sword:
+        tipoIcono = Icons.person;
+        break;
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(8.0),
+      width: 70,
+      height: 100,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(8.0),
+        border: Border.all(color: Colors.brown[800]!, width: 2),
+        image: DecorationImage(
+          image: AssetImage(cartaDetalle.artwork),
+          fit: BoxFit.cover,
+        ),
       ),
-    ),
       child: Column(
         children: [
           // Fila superior con tipo de carta e información de poder
@@ -763,6 +1279,13 @@ class _CampoBatallaState extends State<CampoBatalla> {
         ],
       ),
     );
+  }
+
+  // Método auxiliar para verificar si una carta está en el campo de batalla
+  bool _cartaEstaEnCampoDeBatalla(String carta) {
+    return cartasEnCampoRojot.contains(carta) ||
+          cartasEnCampoRojoa.contains(carta) ||
+          cartasEnCampoRojoc.contains(carta);
   }
 }
 

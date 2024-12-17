@@ -63,6 +63,7 @@ flutter:
     - assets/images/fondo.jpg
     - assets/images/enemy_avatar.jpg
     - assets/images/player_avatar.jpg
+    - assets/images/card_back.png
     - assets/images/caballeros/
     - assets/images/monstruos/
   fonts:
